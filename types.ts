@@ -1,7 +1,13 @@
+
 export enum OwnerType {
   PLAYER = 'player',
   AI = 'ai',
   NEUTRAL = 'neutral',
+}
+
+export enum BuildingType {
+  TOWER = 'TOWER',       // Defensive: Shoots enemies
+  BARRACKS = 'BARRACKS', // Economic: Generates units for the base
 }
 
 export interface Point {
