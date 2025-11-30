@@ -2,27 +2,27 @@
 import { GameConfig } from './types';
 
 export const COLORS = {
-  PLAYER: '#00E436', // Arcade Green
-  NEUTRAL: '#9CA3AF', // Cool Grey
-  ENEMY_1: '#FF004D', // Red
-  ENEMY_2: '#FFA300', // Orange
-  ENEMY_3: '#FFEC27', // Yellow
-  ENEMY_4: '#83769C', // Purple
+  PLAYER: '#00E436', // Arcade Green (Keep unit/base colors bright for visibility)
+  NEUTRAL: '#9CA3AF', 
+  ENEMY_1: '#FF004D', 
+  ENEMY_2: '#FFA300', 
+  ENEMY_3: '#FFEC27', 
+  ENEMY_4: '#83769C', 
   
-  // Terrain Colors (8-Bit Earthy Tones)
-  TERRAIN_WATER: '#1D2B53', // Deep Sea
-  TERRAIN_WATER_SHALLOW: '#29ADFF', // Shoreline
-  TERRAIN_SAND: '#FFEC27', // Sand
-  TERRAIN_GRASS: '#008751', // Base Green
-  TERRAIN_FOREST: '#004E35', // Dark Green
-  TERRAIN_HILL: '#AB5236', // Brown/Reddish
-  TERRAIN_MOUNTAIN: '#C2C3C7', // Grey
-  TERRAIN_MOUNTAIN_PEAK: '#FFF1E8', // Snow/Peak
+  // Terrain Colors (Age of Empires / Realistic RTS Style)
+  TERRAIN_WATER: '#1e3a8a', // Deep Blue
+  TERRAIN_WATER_SHALLOW: '#3b82f6', // Azure
+  TERRAIN_SAND: '#d4b483', // Tan/Beige
+  TERRAIN_GRASS: '#4d6b35', // Olive Green
+  TERRAIN_FOREST: '#2e4222', // Deep Pine Green
+  TERRAIN_HILL: '#8c7352', // Earthy Brown
+  TERRAIN_MOUNTAIN: '#57534e', // Stone Grey
+  TERRAIN_MOUNTAIN_PEAK: '#e5e7eb', // Off-white Snow
 
   WHITE: '#FFFFFF',
   TEXT_DARK: '#0F172A',
   TEXT_LIGHT: '#94A3B8',
-  GOLD: '#FFEC27', // Money Color
+  GOLD: '#FFD700', // Classic Gold
 };
 
 export const CONFIG: GameConfig = {
@@ -34,32 +34,32 @@ export const CONFIG: GameConfig = {
 };
 
 export const COSTS = {
-  HOUSE: 100,      // Increased cost
-  TOWER: 250,      // Increased cost
-  BARRACKS: 300,   // Increased cost
-  SOLDIER: 40,     // Cost to recruit one unit
+  HOUSE: 100,      
+  TOWER: 250,      
+  BARRACKS: 300,   
+  SOLDIER: 40,     
 };
 
 export const ECO = {
-  STARTING_MONEY: 200,     // Lower starting money
-  POP_GROWTH_RATE: 150,    // Much slower population growth (ticks per +1 pop)
-  TAX_RATE: 300,           // Slower tax collection cycles
-  TAX_PER_POP: 0.05,       // Very low tax per person to prevent inflation. 200 pop * 0.05 = $10 per cycle
+  STARTING_MONEY: 200,     
+  POP_GROWTH_RATE: 150,    
+  TAX_RATE: 300,           
+  TAX_PER_POP: 0.05,       
   
   // Population Scaling
-  BASE_START_MAX_POP: 100, // Reduced base cap
+  BASE_START_MAX_POP: 100, 
   POP_PER_LEVEL: 150,      
   POP_PER_HOUSE: 80,      
   
-  UNIT_RATIO: 0.1,         // 10% Rule: Max Units = Pop * 0.1
+  UNIT_RATIO: 0.1,         
 };
 
 export const LEVEL_THRESHOLDS = {
-  LVL_2: 1, // 1 House
-  LVL_3: 3, // 3 Houses
-  LVL_4: 6, // 6 Houses
-  LVL_5: 10, // 10 Houses
-  LVL_6: 15, // 15 Houses
+  LVL_2: 1, 
+  LVL_3: 3, 
+  LVL_4: 6, 
+  LVL_5: 10, 
+  LVL_6: 15, 
 };
 
 export const BUILDING_RADIUS = 12; // Collision radius for buildings

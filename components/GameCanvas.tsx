@@ -670,8 +670,6 @@ class Unit {
     if (this.lastVx < 0) ctx.scale(-1, 1);
 
     // Enhanced 8-Bit Soldier
-    
-    // Calculate leg swing
     const swing = Math.sin(this.walkFrame * 0.8) * 2;
     
     // Legs
@@ -861,7 +859,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       const seed = Math.random() * 1000;
 
       // 1. Base Continent Generation (Lower frequency for larger landmasses)
-      // Use noise scale 0.05 instead of 0.1+
       for (let y = 0; y < rows; y++) {
           const row: TerrainType[] = [];
           for (let x = 0; x < cols; x++) {
@@ -952,6 +949,68 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       mapRowsRef.current = rows;
   };
 
+  // Helper for Painterly Noise
+  const drawNoise = (ctx: CanvasRenderingContext2D, x: number, y: number, color: string, density: number) => {
+      if (Math.random() < density) {
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(x + Math.random() * CELL_SIZE, y + Math.random() * CELL_SIZE, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+      }
+  };
+
+  const drawTreeClump = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+      const cx = x + CELL_SIZE/2;
+      const cy = y + CELL_SIZE/2;
+      
+      // 3-Circle Cluster
+      const drawTree = (dx: number, dy: number, r: number, c: string) => {
+          ctx.fillStyle = c;
+          ctx.beginPath();
+          ctx.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
+          ctx.fill();
+      };
+      
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + 4, 6, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Trees
+      drawTree(-2, 2, 4, COLORS.TERRAIN_FOREST);
+      drawTree(3, 1, 3.5, COLORS.TERRAIN_FOREST);
+      drawTree(0, -2, 4.5, adjustColor(COLORS.TERRAIN_FOREST, 10)); // Top highlight
+  };
+
+  const drawMountainPeak = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+      const cx = x + CELL_SIZE/2;
+      const cy = y + CELL_SIZE/2;
+
+      ctx.fillStyle = COLORS.TERRAIN_MOUNTAIN;
+      ctx.beginPath();
+      ctx.moveTo(cx - 6, cy + 6);
+      ctx.lineTo(cx, cy - 8);
+      ctx.lineTo(cx + 6, cy + 6);
+      ctx.fill();
+
+      // Shadow side
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 8);
+      ctx.lineTo(cx + 6, cy + 6);
+      ctx.lineTo(cx, cy + 6);
+      ctx.fill();
+
+      // Snow
+      ctx.fillStyle = COLORS.TERRAIN_MOUNTAIN_PEAK;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 8);
+      ctx.lineTo(cx - 2, cy - 3);
+      ctx.lineTo(cx + 2, cy - 3);
+      ctx.fill();
+  };
+
   const drawTerrainToStaticCanvas = (width: number, height: number, cols: number, rows: number) => {
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -965,18 +1024,17 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       ctx.fillStyle = COLORS.TERRAIN_WATER;
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Render Cells (Auto-tiling logic for visuals)
+      // 2. Render Painterly Terrain
       for (let y = 0; y < rows; y++) {
           for (let x = 0; x < cols; x++) {
               const type = map[y]?.[x] || TerrainType.WATER;
               const posX = x * CELL_SIZE;
               const posY = y * CELL_SIZE;
 
-              // --- Water & Coastline (Transition from Deep to Shallow) ---
               if (type === TerrainType.WATER) {
-                  // Check neighbors for land
+                  // Shallow water logic
                   let isCoast = false;
-                  const neighbors = [[0,-1], [0,1], [-1,0], [1,0]]; // Up, Down, Left, Right
+                  const neighbors = [[0,-1], [0,1], [-1,0], [1,0]]; 
                   for(const [dx, dy] of neighbors) {
                       const ny = y + dy;
                       const nx = x + dx;
@@ -990,82 +1048,43 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
                   if (isCoast) {
                       ctx.fillStyle = COLORS.TERRAIN_WATER_SHALLOW;
                       ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
-                  } else {
-                      // Occasional wave in deep water
-                      if (Math.random() > 0.98) {
-                          ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                          ctx.fillRect(posX + 2, posY + 4, 3, 1);
+                      // Dithering for smooth transition
+                      if ((x+y)%2 === 0) {
+                          ctx.fillStyle = COLORS.TERRAIN_WATER;
+                          ctx.fillRect(posX, posY, 1, 1);
                       }
                   }
                   continue; 
               }
 
-              // --- Land Drawing ---
-              // Base layer color
-              let color = COLORS.TERRAIN_GRASS;
-              if (type === TerrainType.SAND) color = COLORS.TERRAIN_SAND;
-              else if (type === TerrainType.FOREST) color = COLORS.TERRAIN_GRASS; // Forest sits on grass
-              else if (type === TerrainType.HILL) color = COLORS.TERRAIN_GRASS;   // Hill sits on grass
-              else if (type === TerrainType.MOUNTAIN) color = '#78716c'; // Dark stone base
-              
-              ctx.fillStyle = color;
-              ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
-              
-              // --- Details / Props (Pixel Art Aesthetic) ---
+              // Ground Base Layer
+              if (type === TerrainType.SAND) {
+                  ctx.fillStyle = COLORS.TERRAIN_SAND;
+                  ctx.fillRect(posX, posY, CELL_SIZE + 1, CELL_SIZE + 1); // Slight overlap
+                  drawNoise(ctx, posX, posY, '#c2a170', 0.2); // Darker sand noise
+              } 
+              else if (type === TerrainType.GRASS || type === TerrainType.FOREST || type === TerrainType.HILL) {
+                  // Forest and Hill act as props on top of grass
+                  ctx.fillStyle = COLORS.TERRAIN_GRASS;
+                  ctx.fillRect(posX, posY, CELL_SIZE + 1, CELL_SIZE + 1);
+                  drawNoise(ctx, posX, posY, '#3f572c', 0.1); // Grass texture noise
+              }
+              else if (type === TerrainType.MOUNTAIN) {
+                  // Mountain base ground
+                  ctx.fillStyle = '#6b6661'; 
+                  ctx.fillRect(posX, posY, CELL_SIZE + 1, CELL_SIZE + 1);
+              }
 
+              // Props Layer
               if (type === TerrainType.FOREST) {
-                  // Draw a contiguous forest canopy if neighbors are forest
-                  ctx.fillStyle = COLORS.TERRAIN_FOREST;
-                  
-                  // Center Trunk/Shadow
-                  ctx.fillRect(posX + 2, posY + 1, 4, 6);
-                  // Leaves
-                  ctx.fillRect(posX + 1, posY + 2, 6, 4);
-                  ctx.fillStyle = '#059669'; // Lighter green highlight
-                  ctx.fillRect(posX + 2, posY + 2, 2, 2);
-                  
+                  drawTreeClump(ctx, posX, posY);
               } else if (type === TerrainType.HILL) {
-                  // Draw a round mound
-                  ctx.fillStyle = COLORS.TERRAIN_HILL;
-                  ctx.beginPath();
-                  ctx.moveTo(posX, posY + CELL_SIZE);
-                  ctx.quadraticCurveTo(posX + CELL_SIZE/2, posY, posX + CELL_SIZE, posY + CELL_SIZE);
-                  ctx.fill();
-                  // Highlight
-                  ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                  ctx.fillRect(posX + 2, posY + 2, 2, 2);
-
+                   ctx.fillStyle = COLORS.TERRAIN_HILL;
+                   ctx.beginPath();
+                   ctx.ellipse(posX + CELL_SIZE/2, posY + CELL_SIZE/2, 5, 3, 0, 0, Math.PI * 2);
+                   ctx.fill();
               } else if (type === TerrainType.MOUNTAIN) {
-                  // Draw a sharp peak
-                  ctx.fillStyle = COLORS.TERRAIN_MOUNTAIN; // Grey Body
-                  ctx.beginPath();
-                  ctx.moveTo(posX, posY + CELL_SIZE);
-                  ctx.lineTo(posX + CELL_SIZE/2, posY);
-                  ctx.lineTo(posX + CELL_SIZE, posY + CELL_SIZE);
-                  ctx.fill();
-                  
-                  // Snow cap
-                  ctx.fillStyle = COLORS.TERRAIN_MOUNTAIN_PEAK;
-                  ctx.beginPath();
-                  ctx.moveTo(posX + 2, posY + 4);
-                  ctx.lineTo(posX + CELL_SIZE/2, posY);
-                  ctx.lineTo(posX + 6, posY + 4);
-                  ctx.fill();
-
-                  // Shadow side
-                  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-                  ctx.beginPath();
-                  ctx.moveTo(posX + CELL_SIZE/2, posY);
-                  ctx.lineTo(posX + CELL_SIZE, posY + CELL_SIZE);
-                  ctx.lineTo(posX + CELL_SIZE/2, posY + CELL_SIZE);
-                  ctx.fill();
-                  
-              } else if (type === TerrainType.SAND) {
-                   // Random speckles
-                   if (Math.random() > 0.5) {
-                      ctx.fillStyle = '#d97706';
-                      ctx.fillRect(posX + Math.random() * 4, posY + Math.random() * 4, 1, 1);
-                   }
+                  drawMountainPeak(ctx, posX, posY);
               }
           }
       }
