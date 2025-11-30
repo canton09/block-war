@@ -10,6 +10,15 @@ export enum BuildingType {
   BARRACKS = 'BARRACKS', // Economic: Generates units for the base
 }
 
+export enum TerrainType {
+  WATER = 'WATER',
+  SAND = 'SAND',
+  GRASS = 'GRASS',
+  FOREST = 'FOREST',
+  HILL = 'HILL',
+  MOUNTAIN = 'MOUNTAIN'
+}
+
 export interface Point {
   x: number;
   y: number;
@@ -28,4 +37,11 @@ export enum GameStatus {
   PLAYING = 'PLAYING',
   WON = 'WON',
   LOST = 'LOST',
+}
+
+export interface LogEntry {
+  id: number;
+  timestamp: string;
+  message: string;
+  color?: string;
 }

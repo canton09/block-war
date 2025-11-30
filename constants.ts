@@ -9,11 +9,16 @@ export const COLORS = {
   ENEMY_3: '#FFEC27', // Yellow
   ENEMY_4: '#83769C', // Purple
   
-  // Revised Retro Map Colors (Tactical Deep Blue Theme)
-  WATER_BG: '#0F172A', // Slate 900 - Deep Tactical Blue
-  WATER_PATTERN: '#1E293B', // Slate 800 - Slightly lighter for grid
-  GRID_LINES: 'rgba(56, 189, 248, 0.05)', // Light Sky Blue, very faint
-  
+  // Terrain Colors (8-Bit Earthy Tones)
+  TERRAIN_WATER: '#1D2B53', // Deep Sea
+  TERRAIN_WATER_SHALLOW: '#29ADFF', // Shoreline
+  TERRAIN_SAND: '#FFEC27', // Sand
+  TERRAIN_GRASS: '#008751', // Base Green
+  TERRAIN_FOREST: '#004E35', // Dark Green
+  TERRAIN_HILL: '#AB5236', // Brown/Reddish
+  TERRAIN_MOUNTAIN: '#C2C3C7', // Grey
+  TERRAIN_MOUNTAIN_PEAK: '#FFF1E8', // Snow/Peak
+
   WHITE: '#FFFFFF',
   TEXT_DARK: '#0F172A',
   TEXT_LIGHT: '#94A3B8',
@@ -21,8 +26,8 @@ export const COLORS = {
 
 export const CONFIG: GameConfig = {
   baseRadius: 28,
-  unitSpeed: 0.7, 
-  spawnRate: 100, 
+  unitSpeed: 0.15, // Extremely slow, strategic movement
+  spawnRate: 350, // Very slow production (approx 6 seconds per unit)
   unitSize: 6,
   islandSize: 60,
 };
