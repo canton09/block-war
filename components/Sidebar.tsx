@@ -29,7 +29,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [trackName, setTrackName] = useState(audioManager.getCurrentTrackName());
-
+  
   const toggleSound = () => {
       const muted = audioManager.toggleMute();
       setIsMuted(muted);
@@ -47,7 +47,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <div className="flex flex-col h-full bg-[#1e293b] text-[#94A3B8] overflow-hidden">
+    <div className="flex flex-col h-full bg-[#1e293b] text-[#94A3B8] overflow-hidden relative">
       {/* Header - Shows Money now */}
       <div className="hidden landscape:flex md:flex p-3 bg-[#0F172A] border-b border-[#29ADFF]/30 items-center justify-between flex-shrink-0">
          <div className="flex items-center gap-2">
@@ -76,9 +76,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="landscape:hidden md:hidden p-2 bg-[#0F172A] flex justify-between items-center border-b border-[#1D2B53]">
           <div className="flex items-center gap-2">
               <span className="text-[10px] text-[#FFEC27]">方块战争</span>
-              <button onClick={toggleSound}>
-                 {isMuted ? <VolumeX className="w-3 h-3 text-[#FF004D]" /> : <Volume2 className="w-3 h-3 text-[#00E436]" />}
-              </button>
+              <div className="flex gap-1">
+                <button onClick={toggleSound}>
+                    {isMuted ? <VolumeX className="w-3 h-3 text-[#FF004D]" /> : <Volume2 className="w-3 h-3 text-[#00E436]" />}
+                </button>
+              </div>
           </div>
           <div className="flex items-center gap-1 bg-[#1D2B53] px-2 py-1 rounded">
               <Coins className="w-3 h-3 text-[#FFEC27]" />

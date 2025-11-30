@@ -59,10 +59,10 @@ function noise(x: number, y: number, seed: number) {
     const sin = Math.sin;
     const s = seed;
     return (
-        sin(x * 0.04 + s) * 1.0 + 
-        sin(y * 0.05 + s * 1.5) * 1.0 + 
-        sin(x * 0.1 + y * 0.1 + s) * 0.5
-    ) / 2.5; 
+        sin(x * 0.5 + s) * 1.0 + 
+        sin(x * 1.5 + y * 1.5 + s * 2.1) * 0.5 +
+        sin(y * 2.5 + s * 0.5) * 0.25
+    ) / 1.75; 
 }
 
 // --- Pathfinding (A*) ---
@@ -582,6 +582,7 @@ class Unit {
   walkFrame: number;
   offsetX: number;
   offsetY: number;
+  lastVx: number = 1; // 1 for right, -1 for left
 
   constructor(source: Base, target: Base, color: string, path: Point[], offset: Point) {
     this.x = source.x + offset.x;
@@ -610,6 +611,9 @@ class Unit {
         const dy = ty - this.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
+        if (dx > 0.1) this.lastVx = 1;
+        if (dx < -0.1) this.lastVx = -1;
+
         if (dist < 2) {
             this.pathIndex++;
         } else {
@@ -620,6 +624,9 @@ class Unit {
         const dx = this.target.x - this.x;
         const dy = this.target.y - this.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dx > 0.1) this.lastVx = 1;
+        if (dx < -0.1) this.lastVx = -1;
         
         if (dist < 10) {
             this.hitTarget(createExplosion, onCapture);
@@ -657,36 +664,46 @@ class Unit {
 
   draw(ctx: CanvasRenderingContext2D) {
     if (this.dead) return;
-    let vx = 0;
-    if (this.pathIndex < this.path.length) {
-         const targetPoint = this.path[this.pathIndex];
-         vx = (targetPoint.x * CELL_SIZE + CELL_SIZE/2) - this.x;
-    }
-
+    
     ctx.save();
     ctx.translate(this.x, this.y);
-    if (vx < 0) ctx.scale(-1, 1);
+    if (this.lastVx < 0) ctx.scale(-1, 1);
 
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillRect(-2, 3, 5, 2);
-
-    const step = Math.floor(this.walkFrame) % 4; 
-    ctx.fillStyle = '#222';
-    if (step === 0 || step === 2) {
-        ctx.fillRect(-1, 0, 2, 5); 
-    } else if (step === 1) {
-        ctx.fillRect(-2, 0, 2, 4); 
-        ctx.fillRect(1, 0, 2, 4); 
-    } else {
-        ctx.fillRect(0, 0, 2, 4); 
-    }
-
+    // Enhanced 8-Bit Soldier
+    
+    // Calculate leg swing
+    const swing = Math.sin(this.walkFrame * 0.8) * 2;
+    
+    // Legs
+    ctx.fillStyle = '#111'; // Boots/Pants
+    ctx.fillRect(-2 + swing, 3, 2, 4); // Left Leg
+    ctx.fillRect(-2 - swing, 3, 2, 4); // Right Leg
+    
+    // Body Armor
     ctx.fillStyle = this.color;
-    ctx.fillRect(-2, -5, 5, 5);
-    ctx.fillStyle = adjustColor(this.color, 40);
-    ctx.fillRect(-1, -7, 4, 3);
-    ctx.fillStyle = '#111';
-    ctx.fillRect(1, -3, 5, 2);
+    ctx.fillRect(-3, -3, 6, 6);
+    
+    // Backpack / Gear
+    ctx.fillStyle = adjustColor(this.color, -40);
+    ctx.fillRect(-4, -2, 2, 4);
+
+    // Head
+    ctx.fillStyle = '#e5c29f'; // Skin
+    ctx.fillRect(-1, -6, 3, 3);
+    
+    // Helmet
+    ctx.fillStyle = '#333';
+    ctx.fillRect(-2, -7, 5, 2);
+    ctx.fillRect(-2, -6, 1, 2); // Helmet side
+    
+    // Gun (Rifle)
+    ctx.fillStyle = '#000';
+    ctx.fillRect(1, -1, 6, 2); // Barrel
+    ctx.fillRect(1, 0, 2, 2); // Grip/Stock
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(-3, 6, 6, 2);
 
     ctx.restore();
   }
@@ -843,29 +860,41 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       let map: TerrainType[][] = [];
       const seed = Math.random() * 1000;
 
-      // 1. Initial Noise Generation
+      // 1. Base Continent Generation (Lower frequency for larger landmasses)
+      // Use noise scale 0.05 instead of 0.1+
       for (let y = 0; y < rows; y++) {
           const row: TerrainType[] = [];
           for (let x = 0; x < cols; x++) {
-              const nx = x;
-              const ny = y;
-              const n = noise(nx, ny, seed);
+              // Primary layer: Land vs Water
+              const n = noise(x * 0.04, y * 0.04, seed); 
+              
+              // Secondary layer: Biomes (Moisture/Elevation)
+              const nBiome = noise(x * 0.08 + 100, y * 0.08 + 100, seed);
               
               let type = TerrainType.WATER;
-              if (n < -0.4) type = TerrainType.WATER;     
-              else if (n < -0.3) type = TerrainType.SAND; 
-              else if (n < 0.2) type = TerrainType.GRASS; 
-              else if (n < 0.5) type = TerrainType.FOREST;
-              else if (n < 0.7) type = TerrainType.HILL;  
-              else type = TerrainType.MOUNTAIN;           
 
+              if (n > -0.15) { // Land threshold
+                  if (nBiome > 0.45) {
+                      type = TerrainType.MOUNTAIN;
+                  } else if (nBiome > 0.35) {
+                      type = TerrainType.HILL;
+                  } else if (nBiome > 0.0) {
+                      type = TerrainType.FOREST;
+                  } else {
+                      type = TerrainType.GRASS;
+                  }
+              } else {
+                  // Water
+                  type = TerrainType.WATER;
+              }
+              
               row.push(type);
           }
           map.push(row);
       }
 
-      // 2. Cellular Automata Smoothing (Cleanup lonely pixels)
-      for (let i = 0; i < 2; i++) {
+      // 2. Cellular Automata Smoothing (Cleanup isolated pixels to make it cleaner)
+      for (let i = 0; i < 3; i++) {
           const newMap = JSON.parse(JSON.stringify(map));
           for (let y = 1; y < rows - 1; y++) {
               for (let x = 1; x < cols - 1; x++) {
@@ -878,11 +907,11 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
                   }
                   
                   // Rule: Surrounded by water -> Become water
-                  if (map[y][x] !== TerrainType.WATER && waterCount >= 6) {
+                  if (map[y][x] !== TerrainType.WATER && waterCount >= 5) {
                       newMap[y][x] = TerrainType.WATER;
                   } 
-                  // Rule: Surrounded by land -> Become land
-                  else if (map[y][x] === TerrainType.WATER && waterCount <= 2) {
+                  // Rule: Surrounded by land -> Become neighboring land type
+                  else if (map[y][x] === TerrainType.WATER && waterCount <= 3) {
                        newMap[y][x] = TerrainType.GRASS;
                   }
               }
@@ -890,7 +919,25 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
           map = newMap;
       }
       
-      // 3. Borders
+      // 3. Post-Process: Add Coastlines (Sand)
+      for (let y = 1; y < rows - 1; y++) {
+          for (let x = 1; x < cols - 1; x++) {
+              if (map[y][x] === TerrainType.GRASS || map[y][x] === TerrainType.FOREST) {
+                  // Check for adjacent water
+                  let hasWater = false;
+                   for (let dy = -1; dy <= 1; dy++) {
+                      for (let dx = -1; dx <= 1; dx++) {
+                          if (map[y+dy][x+dx] === TerrainType.WATER) hasWater = true;
+                      }
+                  }
+                  if (hasWater) {
+                      map[y][x] = TerrainType.SAND;
+                  }
+              }
+          }
+      }
+
+      // 4. Force Borders to Water
       for(let y=0; y<rows; y++) {
           map[y][0] = TerrainType.WATER;
           map[y][cols-1] = TerrainType.WATER;
@@ -918,16 +965,16 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       ctx.fillStyle = COLORS.TERRAIN_WATER;
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Render Cells
+      // 2. Render Cells (Auto-tiling logic for visuals)
       for (let y = 0; y < rows; y++) {
           for (let x = 0; x < cols; x++) {
               const type = map[y]?.[x] || TerrainType.WATER;
               const posX = x * CELL_SIZE;
               const posY = y * CELL_SIZE;
 
-              // --- Water & Coastline Logic ---
+              // --- Water & Coastline (Transition from Deep to Shallow) ---
               if (type === TerrainType.WATER) {
-                  // Check neighbors for coastline effect
+                  // Check neighbors for land
                   let isCoast = false;
                   const neighbors = [[0,-1], [0,1], [-1,0], [1,0]]; // Up, Down, Left, Right
                   for(const [dx, dy] of neighbors) {
@@ -943,60 +990,81 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
                   if (isCoast) {
                       ctx.fillStyle = COLORS.TERRAIN_WATER_SHALLOW;
                       ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
+                  } else {
+                      // Occasional wave in deep water
+                      if (Math.random() > 0.98) {
+                          ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                          ctx.fillRect(posX + 2, posY + 4, 3, 1);
+                      }
                   }
                   continue; 
               }
 
               // --- Land Drawing ---
+              // Base layer color
               let color = COLORS.TERRAIN_GRASS;
               if (type === TerrainType.SAND) color = COLORS.TERRAIN_SAND;
-              else if (type === TerrainType.FOREST) color = COLORS.TERRAIN_FOREST;
-              else if (type === TerrainType.HILL) color = COLORS.TERRAIN_HILL;
-              else if (type === TerrainType.MOUNTAIN) color = COLORS.TERRAIN_MOUNTAIN;
+              else if (type === TerrainType.FOREST) color = COLORS.TERRAIN_GRASS; // Forest sits on grass
+              else if (type === TerrainType.HILL) color = COLORS.TERRAIN_GRASS;   // Hill sits on grass
+              else if (type === TerrainType.MOUNTAIN) color = '#78716c'; // Dark stone base
               
               ctx.fillStyle = color;
               ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
               
-              // --- Organic Texture Details (No more grid lines) ---
-              // Use pseudo-random deterministic noise based on coordinates
-              const seed = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-              const rand = seed - Math.floor(seed);
+              // --- Details / Props (Pixel Art Aesthetic) ---
 
-              if (type === TerrainType.GRASS) {
-                  // Sparse noise for grass
-                  if (rand > 0.85) {
-                      ctx.fillStyle = 'rgba(0,0,0,0.08)';
-                      ctx.fillRect(posX + 2, posY + 2, 2, 2);
-                  }
-              } else if (type === TerrainType.FOREST) {
-                  // Tree Clusters (Darker green organic shapes)
-                  ctx.fillStyle = '#003a28'; 
-                  if (rand > 0.5) {
-                      // Shape A: Tall Tree
-                      ctx.fillRect(posX + 3, posY + 1, 2, 5);
-                      ctx.fillRect(posX + 1, posY + 3, 6, 2);
-                  } else {
-                      // Shape B: Bushy Cluster
-                      ctx.fillRect(posX + 1, posY + 1, 3, 3);
-                      ctx.fillRect(posX + 4, posY + 4, 3, 3);
-                  }
-              } else if (type === TerrainType.HILL) {
-                  // Mounds
-                  ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                  ctx.fillRect(posX + 2, posY + 4, 4, 2);
-                  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+              if (type === TerrainType.FOREST) {
+                  // Draw a contiguous forest canopy if neighbors are forest
+                  ctx.fillStyle = COLORS.TERRAIN_FOREST;
+                  
+                  // Center Trunk/Shadow
+                  ctx.fillRect(posX + 2, posY + 1, 4, 6);
+                  // Leaves
+                  ctx.fillRect(posX + 1, posY + 2, 6, 4);
+                  ctx.fillStyle = '#059669'; // Lighter green highlight
                   ctx.fillRect(posX + 2, posY + 2, 2, 2);
+                  
+              } else if (type === TerrainType.HILL) {
+                  // Draw a round mound
+                  ctx.fillStyle = COLORS.TERRAIN_HILL;
+                  ctx.beginPath();
+                  ctx.moveTo(posX, posY + CELL_SIZE);
+                  ctx.quadraticCurveTo(posX + CELL_SIZE/2, posY, posX + CELL_SIZE, posY + CELL_SIZE);
+                  ctx.fill();
+                  // Highlight
+                  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                  ctx.fillRect(posX + 2, posY + 2, 2, 2);
+
               } else if (type === TerrainType.MOUNTAIN) {
-                  // Snow Peaks
+                  // Draw a sharp peak
+                  ctx.fillStyle = COLORS.TERRAIN_MOUNTAIN; // Grey Body
+                  ctx.beginPath();
+                  ctx.moveTo(posX, posY + CELL_SIZE);
+                  ctx.lineTo(posX + CELL_SIZE/2, posY);
+                  ctx.lineTo(posX + CELL_SIZE, posY + CELL_SIZE);
+                  ctx.fill();
+                  
+                  // Snow cap
                   ctx.fillStyle = COLORS.TERRAIN_MOUNTAIN_PEAK;
-                  ctx.fillRect(posX + 2, posY + 1, 4, 3);
-                  // Rocky Shadow
-                  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                  ctx.fillRect(posX + 4, posY + 3, 2, 5);
+                  ctx.beginPath();
+                  ctx.moveTo(posX + 2, posY + 4);
+                  ctx.lineTo(posX + CELL_SIZE/2, posY);
+                  ctx.lineTo(posX + 6, posY + 4);
+                  ctx.fill();
+
+                  // Shadow side
+                  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                  ctx.beginPath();
+                  ctx.moveTo(posX + CELL_SIZE/2, posY);
+                  ctx.lineTo(posX + CELL_SIZE, posY + CELL_SIZE);
+                  ctx.lineTo(posX + CELL_SIZE/2, posY + CELL_SIZE);
+                  ctx.fill();
+                  
               } else if (type === TerrainType.SAND) {
-                   if (rand > 0.7) {
-                      ctx.fillStyle = '#ccbb22';
-                      ctx.fillRect(posX + 4, posY + 4, 2, 2);
+                   // Random speckles
+                   if (Math.random() > 0.5) {
+                      ctx.fillStyle = '#d97706';
+                      ctx.fillRect(posX + Math.random() * 4, posY + Math.random() * 4, 1, 1);
                    }
               }
           }
@@ -1021,7 +1089,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     drawTerrainToStaticCanvas(width, height, cols, rows);
 
     const isSmallScreen = width < 600 || height < 600;
-    const targetCount = isSmallScreen ? 8 : 15; 
+    const targetCount = isSmallScreen ? 8 : 12; // Slightly fewer bases for cleaner map
     
     const validPositions: Point[] = [];
     const marginX = 50;
@@ -1030,7 +1098,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     const safeHeight = Math.max(100, height - marginY * 2);
 
     let attempts = 0;
-    while (validPositions.length < targetCount && attempts < 1000) {
+    while (validPositions.length < targetCount && attempts < 2000) {
          attempts++;
          const px = marginX + Math.random() * safeWidth;
          const py = marginY + Math.random() * safeHeight;
@@ -1040,10 +1108,11 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
          
          if (ty >= 0 && ty < rows && tx >= 0 && tx < cols) {
              const type = terrainMapRef.current[ty][tx];
-             if (type === TerrainType.GRASS || type === TerrainType.FOREST || type === TerrainType.HILL) {
+             // Bases prefer solid ground, avoid high mountains or deep forest centers
+             if (type === TerrainType.GRASS || type === TerrainType.HILL || type === TerrainType.FOREST) {
                   let tooClose = false;
                   for (const p of validPositions) {
-                      if ((px - p.x)**2 + (py - p.y)**2 < 8000) {
+                      if ((px - p.x)**2 + (py - p.y)**2 < 10000) { // Increased spacing
                           tooClose = true;
                           break;
                       }
@@ -1130,7 +1199,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
         }
     });
     
-    onAddLog("系统启动: 战争规则更新。", COLORS.GOLD);
+    onAddLog("系统启动: 地形数据加载完毕。", COLORS.GOLD);
   };
 
   const processAIConstruction = () => {
