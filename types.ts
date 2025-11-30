@@ -7,7 +7,8 @@ export enum OwnerType {
 
 export enum BuildingType {
   TOWER = 'TOWER',       // Defensive: Shoots enemies
-  BARRACKS = 'BARRACKS', // Economic: Generates units for the base
+  BARRACKS = 'BARRACKS', // Military: Allows recruiting
+  HOUSE = 'HOUSE',       // Economic: Increases max population
 }
 
 export enum TerrainType {
@@ -44,4 +45,15 @@ export interface LogEntry {
   timestamp: string;
   message: string;
   color?: string;
+}
+
+export interface BaseInfo {
+    id: string;
+    units: number;
+    population: number;
+    maxPopulation: number;
+    level: number;
+    unitCap: number;
+    isMine: boolean;
+    hasBarracks: boolean;
 }

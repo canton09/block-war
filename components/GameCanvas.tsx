@@ -1,24 +1,26 @@
 
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
-import { COLORS, CONFIG, BUILD_COST, BUILDING_RADIUS } from '../constants';
-import { GameStatus, OwnerType, BuildingType, Point, TerrainType } from '../types';
+import { COLORS, CONFIG, COSTS, ECO, BUILDING_RADIUS, LEVEL_THRESHOLDS } from '../constants';
+import { GameStatus, OwnerType, BuildingType, Point, TerrainType, BaseInfo } from '../types';
+import { audioManager } from '../audioManager';
 
 export interface GameCanvasRef {
   setBuildMode: (type: BuildingType | null) => void;
+  recruitUnit: () => void;
 }
 
 interface GameCanvasProps {
   gameStatus: GameStatus;
+  playerMoney: number;
+  setPlayerMoney: (val: number) => void;
   onGameOver: (win: boolean) => void;
   triggerRestart: number;
-  onSelectionChange: (base: { id: string, units: number, isMine: boolean, canAfford: boolean } | null) => void;
+  onSelectionChange: (base: BaseInfo | null) => void;
   onCancelBuild: () => void;
   onAddLog: (message: string, color?: string) => void;
 }
 
 const CELL_SIZE = 8;
-const GRID_W = 100; // Max Grid Width fallback
-const GRID_H = 100;
 
 // --- Helper Utils ---
 
@@ -89,14 +91,12 @@ function findPath(start: Point, end: Point, map: TerrainType[][], cols: number, 
 
     while (openSet.length > 0 && iterations < MAX_ITERATIONS) {
         iterations++;
-        // Find lowest f
         let lowInd = 0;
         for(let i=0; i<openSet.length; i++) {
             if(openSet[i].f < openSet[lowInd].f) { lowInd = i; }
         }
         let current = openSet[lowInd];
 
-        // End condition (within 1 cell range)
         if(Math.abs(current.x - end.x) <= 1 && Math.abs(current.y - end.y) <= 1) {
             const path: Point[] = [];
             let temp: Node | null = current;
@@ -111,7 +111,7 @@ function findPath(start: Point, end: Point, map: TerrainType[][], cols: number, 
         closedSet.add(`${current.x},${current.y}`);
 
         const neighbors = [
-            {x:0, y:-1}, {x:0, y:1}, {x:-1, y:0}, {x:1, y:0} // 4-directional movement for grid feel
+            {x:0, y:-1}, {x:0, y:1}, {x:-1, y:0}, {x:1, y:0}
         ];
 
         for(let i=0; i<neighbors.length; i++) {
@@ -120,7 +120,6 @@ function findPath(start: Point, end: Point, map: TerrainType[][], cols: number, 
 
             if(nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
             
-            // Obstacle check
             const terrain = map[ny][nx];
             if (terrain === TerrainType.WATER || terrain === TerrainType.MOUNTAIN) continue;
             
@@ -146,7 +145,7 @@ function findPath(start: Point, end: Point, map: TerrainType[][], cols: number, 
             }
         }
     }
-    return []; // No path found
+    return [];
 }
 
 
@@ -160,7 +159,6 @@ class Building {
     ownerBaseId: string;
     color: string;
     shootTimer: number = 0;
-    produceTimer: number = 0;
     
     constructor(id: string, type: BuildingType, x: number, y: number, ownerBaseId: string, color: string) {
         this.id = id;
@@ -171,11 +169,12 @@ class Building {
         this.color = color;
     }
 
-    update(units: Unit[], createLaser: (x1: number, y1: number, x2: number, y2: number, color: string) => void, addUnitToBase: () => void) {
+    update(units: Unit[], createLaser: (x1: number, y1: number, x2: number, y2: number, color: string) => void) {
+        // TOWER LOGIC
         if (this.type === BuildingType.TOWER) {
             this.shootTimer++;
             const fireRate = 50;
-            const range = 120; // High ground advantage
+            const range = 120;
             
             if (this.shootTimer > fireRate) {
                 let targetUnit: Unit | null = null;
@@ -196,16 +195,12 @@ class Building {
                 if (targetUnit) {
                     targetUnit.dead = true;
                     this.shootTimer = 0;
+                    audioManager.playShoot();
                     createLaser(this.x, this.y - 15, targetUnit.x, targetUnit.y, this.color);
                 }
             }
-        } else if (this.type === BuildingType.BARRACKS) {
-            this.produceTimer++;
-            if (this.produceTimer > 300) { 
-                this.produceTimer = 0;
-                addUnitToBase();
-            }
-        }
+        } 
+        // BARRACKS and HOUSE are passive or handled by Base/UI interaction
     }
 
     draw(ctx: CanvasRenderingContext2D) {
@@ -215,40 +210,51 @@ class Building {
         ctx.save();
         ctx.translate(cx, cy);
 
-        // Shadow (Pixelated)
+        // Shadow
         ctx.fillStyle = 'rgba(0,0,0,0.4)';
         ctx.fillRect(-8, 2, 16, 6);
 
         if (this.type === BuildingType.TOWER) {
-             // Sentry Tower on Hill
-             ctx.fillStyle = '#2d2d2d'; // Stone foundation
+             ctx.fillStyle = '#2d2d2d';
              ctx.fillRect(-6, -10, 12, 10);
              ctx.fillStyle = this.color;
-             ctx.fillRect(-5, -18, 10, 8); // Cabin
-             // Viewport
+             ctx.fillRect(-5, -18, 10, 8);
              ctx.fillStyle = '#000';
              ctx.fillRect(-3, -15, 6, 2);
-             // Antenna
              ctx.strokeStyle = '#888';
              ctx.lineWidth = 1;
              ctx.beginPath();
              ctx.moveTo(0, -18); ctx.lineTo(0, -24);
              ctx.stroke();
-             // Light
              const t = Math.floor(Date.now() / 200) % 2;
              ctx.fillStyle = t === 0 ? '#FF0000' : '#550000';
              ctx.fillRect(-1, -25, 2, 2);
 
         } else if (this.type === BuildingType.BARRACKS) {
-            // Training Facility
             ctx.fillStyle = '#3f3f3f';
             ctx.fillRect(-10, -8, 20, 8);
             ctx.fillStyle = this.color;
             ctx.fillRect(-8, -12, 16, 4);
-            // Double Doors
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(-4, -6, 3, 6);
             ctx.fillRect(1, -6, 3, 6);
+            // Swords Icon
+            ctx.fillStyle = '#FFF';
+            ctx.fillRect(-1, -15, 2, 2); 
+            
+        } else if (this.type === BuildingType.HOUSE) {
+            // Little cottage
+            ctx.fillStyle = '#C2C3C7'; // Walls
+            ctx.fillRect(-7, -6, 14, 6);
+            ctx.fillStyle = '#AB5236'; // Roof
+            ctx.beginPath();
+            ctx.moveTo(-9, -6);
+            ctx.lineTo(0, -12);
+            ctx.lineTo(9, -6);
+            ctx.fill();
+            // Door
+            ctx.fillStyle = '#4B2D1F';
+            ctx.fillRect(-2, -4, 4, 4);
         }
 
         ctx.restore();
@@ -263,9 +269,20 @@ class Base {
   units: number;
   ownerType: OwnerType;
   radius: number;
+  level: number;
+  
+  // Economy
+  money: number = 0; // AI Wallet (Player uses global state)
+  population: number;
+  maxPopulation: number;
+  popGrowTimer: number = 0;
+  taxTimer: number = 0;
+  hasBarracks: boolean = false;
+  
   spawnTimer: number;
   visualPulse: number;
   territoryPath: Path2D | null = null;
+  territoryCells: Point[] = []; // Store raw cells for AI decision making
   neighbors: Set<Base> = new Set();
   
   constructor(id: string, x: number, y: number, color: string, ownerType: OwnerType) {
@@ -273,45 +290,93 @@ class Base {
     this.x = x;
     this.y = y;
     this.color = color;
-    this.units = 10;
     this.ownerType = ownerType;
     this.radius = CONFIG.baseRadius;
     this.spawnTimer = 0;
     this.visualPulse = 0;
+    this.level = 1;
+    this.money = ECO.STARTING_MONEY; // Start with some funds
+    
+    // Initial Stats
+    this.units = ownerType === OwnerType.NEUTRAL ? 5 : 10;
+    this.population = 40; 
+    this.maxPopulation = ECO.BASE_START_MAX_POP;
   }
 
   setTerritory(cells: Point[]) {
+    this.territoryCells = cells;
     this.territoryPath = new Path2D();
     cells.forEach(cell => {
       this.territoryPath!.rect(cell.x, cell.y, CELL_SIZE, CELL_SIZE); 
     });
+  }
+  
+  getUnitCap() {
+      return Math.floor(this.population * ECO.UNIT_RATIO);
   }
 
   update(
     gameActive: boolean, 
     bases: Base[], 
     units: Unit[], 
-    sendSquad: (source: Base, target: Base) => void
+    sendSquad: (source: Base, target: Base) => void,
+    onIncome: (amount: number) => void
   ) {
     if (!gameActive) return;
+    const unitCap = this.getUnitCap();
 
     if (this.ownerType !== OwnerType.NEUTRAL) {
-      this.spawnTimer++;
-      let rate = CONFIG.spawnRate;
-      if (this.ownerType === OwnerType.PLAYER) rate *= 0.9; 
+      // 1. Natural Militia Spawn (Strictly capped by 10% rule)
+      if (this.units < unitCap) {
+        this.spawnTimer++;
+        if (this.spawnTimer >= CONFIG.spawnRate) {
+          this.units++;
+          this.spawnTimer = 0;
+        }
+      }
 
-      if (this.spawnTimer >= rate) {
-        this.units++;
-        this.spawnTimer = 0;
-        this.visualPulse = 3;
+      // 2. Population Growth (Slow & Steady)
+      if (this.population < this.maxPopulation) {
+          this.popGrowTimer++;
+          if (this.popGrowTimer >= ECO.POP_GROWTH_RATE) {
+              this.population++;
+              this.popGrowTimer = 0;
+          }
+      }
+
+      // 3. Tax Generation
+      this.taxTimer++;
+      if (this.taxTimer >= ECO.TAX_RATE) {
+          this.taxTimer = 0;
+          const income = Math.floor(this.population * ECO.TAX_PER_POP);
+          if (income > 0) {
+              if (this.ownerType === OwnerType.PLAYER) {
+                  onIncome(income);
+              } else {
+                  this.money += income;
+              }
+          }
       }
     }
 
-    // AI Logic: Send Squads
+    // AI Logic: Recruit and Attack
     if (this.ownerType === OwnerType.AI) {
-      let aggression = this.units > 40 ? 0.003 : 0.0005;
       
-      if (Math.random() < aggression && this.units > 12) {
+      // AI Recruiting (If has barracks and money)
+      if (this.hasBarracks && this.units < unitCap && this.money >= COSTS.SOLDIER) {
+          // AI Recruits if it has spare money or is under threat
+          if (Math.random() < 0.05) { 
+              this.money -= COSTS.SOLDIER;
+              this.units++;
+              this.visualPulse = 5;
+          }
+      }
+
+      // AI Spends units to attack
+      let aggression = 0.003;
+      if (this.units > unitCap * 0.9) aggression = 0.01; // Aggressive if at cap
+
+      if (Math.random() < aggression && this.units > 5) {
         const neighbors = Array.from(this.neighbors);
         if (neighbors.length > 0) {
             let target = neighbors.find(n => n.ownerType !== this.ownerType && n.units < this.units * 0.8); 
@@ -328,6 +393,25 @@ class Base {
     if (this.visualPulse > 0) this.visualPulse--;
   }
 
+  recalculateStats(buildings: Building[]) {
+      // 1. Count Houses
+      let houses = buildings.filter(b => b.ownerBaseId === this.id && b.type === BuildingType.HOUSE).length;
+      this.hasBarracks = buildings.some(b => b.ownerBaseId === this.id && b.type === BuildingType.BARRACKS);
+
+      // 2. Determine Level
+      if (houses >= LEVEL_THRESHOLDS.LVL_6) this.level = 6;
+      else if (houses >= LEVEL_THRESHOLDS.LVL_5) this.level = 5;
+      else if (houses >= LEVEL_THRESHOLDS.LVL_4) this.level = 4;
+      else if (houses >= LEVEL_THRESHOLDS.LVL_3) this.level = 3;
+      else if (houses >= LEVEL_THRESHOLDS.LVL_2) this.level = 2;
+      else this.level = 1;
+
+      // 3. Calculate Max Pop CAP (Population grows towards this, doesn't jump)
+      const levelBonus = (this.level - 1) * ECO.POP_PER_LEVEL;
+      const houseBonus = houses * ECO.POP_PER_HOUSE;
+      this.maxPopulation = ECO.BASE_START_MAX_POP + levelBonus + houseBonus;
+  }
+
   drawTerritory(ctx: CanvasRenderingContext2D, isHighlight: boolean) {
     if (!this.territoryPath) return;
     
@@ -341,14 +425,12 @@ class Base {
        ctx.fillStyle = topColor;
        ctx.fill(this.territoryPath);
        
-       // Grid Effect for Territory
        ctx.strokeStyle = 'rgba(0,0,0,0.1)';
        ctx.lineWidth = 0.5;
        ctx.stroke(this.territoryPath);
 
        ctx.restore();
        
-       // Border
        ctx.lineWidth = 1;
        ctx.strokeStyle = adjustColor(topColor, 60);
        ctx.globalAlpha = 0.7;
@@ -365,7 +447,6 @@ class Base {
   drawStructure(ctx: CanvasRenderingContext2D, isSelected: boolean) {
     const cx = this.x;
     const cy = this.y - 10;
-    
     const baseColor = this.color;
     const scale = 1 + (this.visualPulse / 15);
 
@@ -373,52 +454,105 @@ class Base {
     ctx.translate(cx, cy);
     ctx.scale(scale, scale);
 
-    // Fortress Graphics
-    ctx.fillStyle = '#000000'; // Shadow
-    ctx.fillRect(-12, 5, 24, 8);
+    // Dynamic Castle Graphics based on Level
+    const lvl = this.ownerType === OwnerType.NEUTRAL ? 1 : this.level;
 
-    // Main Keep
-    ctx.fillStyle = '#475569'; 
-    ctx.fillRect(-10, -10, 20, 20);
-    
-    // Battlements
-    ctx.fillStyle = baseColor;
-    ctx.fillRect(-12, -14, 6, 8); 
-    ctx.fillRect(6, -14, 6, 8);   
-    ctx.fillRect(-4, -18, 8, 8); // Central Tower
+    // Common Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(-14, 6, 28, 8);
 
-    // Gate
-    ctx.fillStyle = '#0F172A';
-    ctx.fillRect(-3, 0, 6, 10); 
+    if (lvl === 1) {
+        // Outpost
+        ctx.fillStyle = '#475569'; ctx.fillRect(-8, -6, 16, 14); // Body
+        ctx.fillStyle = baseColor; ctx.fillRect(-8, -8, 16, 2); // Roof line
+        ctx.fillStyle = '#0F172A'; ctx.fillRect(-3, 0, 6, 8); // Door
+    } else if (lvl === 2) {
+        // Fort
+        ctx.fillStyle = '#475569'; ctx.fillRect(-10, -8, 20, 16);
+        ctx.fillStyle = baseColor; ctx.fillRect(-12, -10, 4, 6); // Left Turret
+        ctx.fillStyle = baseColor; ctx.fillRect(8, -10, 4, 6); // Right Turret
+        ctx.fillStyle = '#0F172A'; ctx.fillRect(-4, 0, 8, 8);
+        ctx.fillStyle = '#1e293b'; ctx.fillRect(-8, -4, 4, 4); // Windows
+        ctx.fillStyle = '#1e293b'; ctx.fillRect(4, -4, 4, 4);
+    } else if (lvl === 3) {
+        // Keep
+        ctx.fillStyle = '#475569'; ctx.fillRect(-12, -8, 24, 16);
+        ctx.fillStyle = '#334155'; ctx.fillRect(-6, -16, 12, 8); // Central Tower
+        ctx.fillStyle = baseColor; ctx.fillRect(-8, -20, 16, 4); // Tower Roof
+        ctx.fillStyle = '#0F172A'; ctx.fillRect(-4, 2, 8, 6);
+    } else if (lvl === 4) {
+        // Castle
+        ctx.fillStyle = '#475569'; ctx.fillRect(-14, -8, 28, 16);
+        ctx.fillStyle = '#334155'; ctx.fillRect(-14, -18, 8, 10); // L Tower
+        ctx.fillStyle = '#334155'; ctx.fillRect(6, -18, 8, 10); // R Tower
+        ctx.fillStyle = baseColor; ctx.fillRect(-16, -22, 12, 6); // L Roof
+        ctx.fillStyle = baseColor; ctx.fillRect(4, -22, 12, 6); // R Roof
+        ctx.fillStyle = '#0F172A'; ctx.fillRect(-5, 0, 10, 8);
+    } else if (lvl === 5) {
+        // Fortress
+        ctx.fillStyle = '#475569'; ctx.fillRect(-16, -10, 32, 18);
+        ctx.fillStyle = '#1e293b'; ctx.fillRect(-10, -24, 20, 14); // Keep
+        ctx.fillStyle = baseColor; ctx.fillRect(-12, -28, 24, 6); // Keep Roof
+        ctx.fillStyle = baseColor; ctx.fillRect(-18, -14, 6, 8); // Side deco
+        ctx.fillStyle = baseColor; ctx.fillRect(12, -14, 6, 8);
+        ctx.fillStyle = '#FFEC27'; ctx.fillRect(-2, -32, 4, 4); // Gold Top
+        ctx.fillStyle = '#0F172A'; ctx.fillRect(-6, 0, 12, 10);
+    } else {
+        // Palace (Level 6)
+        ctx.fillStyle = '#1e293b'; ctx.fillRect(-18, -12, 36, 20); // Darker base
+        ctx.fillStyle = '#475569'; ctx.fillRect(-12, -28, 24, 16); // High Keep
+        ctx.fillStyle = baseColor; ctx.fillRect(-20, -16, 8, 12); // L Wing
+        ctx.fillStyle = baseColor; ctx.fillRect(12, -16, 8, 12); // R Wing
+        ctx.fillStyle = '#FFEC27'; ctx.fillRect(-14, -34, 28, 6); // Gold Roof
+        ctx.fillStyle = '#FFEC27'; ctx.fillRect(-2, -40, 4, 8); // Spire
+        ctx.fillStyle = '#0F172A'; ctx.fillRect(-6, 2, 12, 6); // Grand Gate
+        // Banners
+        ctx.fillStyle = baseColor; ctx.fillRect(-22, -20, 4, 8);
+        ctx.fillStyle = baseColor; ctx.fillRect(18, -20, 4, 8);
+    }
 
-    // Flag
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(-1, -26, 2, 8);
-    const wave = Math.floor(Date.now() / 200) % 2;
-    ctx.fillStyle = this.ownerType === OwnerType.NEUTRAL ? '#ccc' : baseColor;
-    ctx.fillRect(1, wave === 0 ? -26 : -25, 8, 5);
+    // Flag logic (Waving)
+    if (this.ownerType !== OwnerType.NEUTRAL) {
+        const wave = Math.floor(Date.now() / 200) % 2;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(-1, lvl >= 5 ? -44 : lvl >= 3 ? -30 : -20, 2, 8);
+        ctx.fillStyle = baseColor;
+        ctx.fillRect(1, (lvl >= 5 ? -44 : lvl >= 3 ? -30 : -20) + (wave ? 1 : 0), 6, 4);
+    }
 
-    // Unit Count Badge
+    // Badges
     ctx.save();
-    ctx.translate(0, -35); 
+    ctx.translate(0, lvl >= 5 ? -50 : lvl >= 3 ? -38 : -28); 
     ctx.scale(1/scale, 1/scale);
     
+    // Unit Count
     const countStr = Math.floor(this.units).toString();
     ctx.font = '12px "Press Start 2P"';
     const textWidth = ctx.measureText(countStr).width;
     const boxW = Math.max(20, textWidth + 8);
+    
+    // Unit Cap Warning Color
+    const unitCap = this.getUnitCap();
+    const isAtCap = this.units >= unitCap;
 
-    ctx.fillStyle = '#000';
+    ctx.fillStyle = isAtCap ? '#FF004D' : '#000';
     ctx.fillRect(-boxW/2, -10, boxW, 20);
     ctx.fillStyle = '#fff'; 
-    if (this.units >= BUILD_COST && this.ownerType === OwnerType.PLAYER) {
-        ctx.fillStyle = '#FFEC27'; 
-    }
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(countStr, 0, 2);
-    ctx.restore(); 
 
+    // Pop Count
+    if (this.ownerType !== OwnerType.NEUTRAL) {
+        ctx.font = '8px "Press Start 2P"';
+        const popStr = `人:${this.population}`;
+        ctx.fillStyle = '#1D2B53';
+        ctx.fillRect(-boxW/2, -22, boxW, 10);
+        ctx.fillStyle = '#29ADFF';
+        ctx.fillText(popStr, 0, -17);
+    }
+
+    ctx.restore(); 
     ctx.restore(); 
 
     if (isSelected) {
@@ -467,11 +601,8 @@ class Unit {
     if (this.dead) return;
     this.walkFrame += 0.2;
 
-    // Movement Logic
     if (this.pathIndex < this.path.length) {
         const targetPoint = this.path[this.pathIndex];
-        // Convert grid coordinate back to world coordinate for movement
-        // Add random slight jitter to make them look like a crowd not a line
         const tx = targetPoint.x * CELL_SIZE + CELL_SIZE/2 + this.offsetX * 0.5;
         const ty = targetPoint.y * CELL_SIZE + CELL_SIZE/2 + this.offsetY * 0.5;
         
@@ -486,7 +617,6 @@ class Unit {
             this.y += (dy / dist) * this.speed;
         }
     } else {
-        // Reached end of path (Base center roughly)
         const dx = this.target.x - this.x;
         const dy = this.target.y - this.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -494,7 +624,6 @@ class Unit {
         if (dist < 10) {
             this.hitTarget(createExplosion, onCapture);
         } else {
-            // Final approach if path ends near base but not inside
              this.x += (dx / dist) * this.speed;
              this.y += (dy / dist) * this.speed;
         }
@@ -504,17 +633,23 @@ class Unit {
   hitTarget(createExplosion: (x: number, y: number, color: string) => void, onCapture: (base: Base, newColor: string) => void) {
     this.dead = true;
     createExplosion(this.x, this.y, this.color);
+    audioManager.playExplosion();
 
     if (this.target.color === this.color) {
       this.target.units++;
     } else {
       this.target.units -= 1;
       if (this.target.units <= 0) {
-        // CAPTURE EVENT
         this.target.ownerType = getOwnerTypeByColor(this.color);
         this.target.color = this.color;
         this.target.units = 1;
         this.target.visualPulse = 20;
+        // Reset economy on capture
+        this.target.population = 40; // Reset pop
+        this.target.level = 1;
+        this.target.maxPopulation = ECO.BASE_START_MAX_POP; 
+        this.target.money = 0; // Seize the coffers (or empty them)
+        audioManager.playCapture();
         onCapture(this.target, this.color);
       }
     }
@@ -522,8 +657,6 @@ class Unit {
 
   draw(ctx: CanvasRenderingContext2D) {
     if (this.dead) return;
-
-    // Determine facing based on next path node
     let vx = 0;
     if (this.pathIndex < this.path.length) {
          const targetPoint = this.path[this.pathIndex];
@@ -532,37 +665,26 @@ class Unit {
 
     ctx.save();
     ctx.translate(this.x, this.y);
-    
-    // Flip if moving left
     if (vx < 0) ctx.scale(-1, 1);
 
-    // Shadow
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.fillRect(-2, 3, 5, 2);
 
-    const step = Math.floor(this.walkFrame) % 4; // 4 frame walk cycle
-
-    // Soldier Art (Side viewish)
-    // Legs
+    const step = Math.floor(this.walkFrame) % 4; 
     ctx.fillStyle = '#222';
     if (step === 0 || step === 2) {
-        ctx.fillRect(-1, 0, 2, 5); // Stand
+        ctx.fillRect(-1, 0, 2, 5); 
     } else if (step === 1) {
-        ctx.fillRect(-2, 0, 2, 4); // Left fwd
+        ctx.fillRect(-2, 0, 2, 4); 
         ctx.fillRect(1, 0, 2, 4); 
     } else {
         ctx.fillRect(0, 0, 2, 4); 
     }
 
-    // Body
     ctx.fillStyle = this.color;
     ctx.fillRect(-2, -5, 5, 5);
-
-    // Head/Helmet
     ctx.fillStyle = adjustColor(this.color, 40);
     ctx.fillRect(-1, -7, 4, 3);
-    
-    // Gun
     ctx.fillStyle = '#111';
     ctx.fillRect(1, -3, 5, 2);
 
@@ -638,6 +760,8 @@ class Laser {
 
 const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
   gameStatus,
+  playerMoney,
+  setPlayerMoney,
   onGameOver,
   triggerRestart,
   onSelectionChange,
@@ -665,20 +789,50 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
   const animationFrameIdRef = useRef<number>(0);
   
   const prevSizeRef = useRef<{w: number, h: number}>({w: 0, h: 0});
+  const moneyRef = useRef(playerMoney);
+
+  // Sync ref with prop
+  useEffect(() => {
+      moneyRef.current = playerMoney;
+  }, [playerMoney]);
 
   useImperativeHandle(ref, () => ({
     setBuildMode: (type: BuildingType | null) => {
         buildModeRef.current = type;
+    },
+    recruitUnit: () => {
+        const sb = selectedBaseRef.current;
+        if (sb && sb.ownerType === OwnerType.PLAYER) {
+            const unitCap = sb.getUnitCap();
+            if (sb.units >= unitCap) {
+                onAddLog(`征兵失败: 兵力已达人口上限 (${unitCap})`, '#FF004D');
+                return;
+            }
+
+            if (moneyRef.current >= COSTS.SOLDIER) {
+                const newMoney = moneyRef.current - COSTS.SOLDIER;
+                setPlayerMoney(newMoney);
+                moneyRef.current = newMoney;
+                sb.units++;
+                sb.visualPulse = 5;
+                reportSelection(sb);
+            }
+        }
     }
   }));
 
   const reportSelection = (base: Base | null) => {
       if (base) {
+          const hasBarracks = buildingsRef.current.some(b => b.ownerBaseId === base.id && b.type === BuildingType.BARRACKS);
           onSelectionChange({
               id: base.id,
               units: Math.floor(base.units),
+              population: base.population,
+              maxPopulation: base.maxPopulation,
+              level: base.level,
+              unitCap: base.getUnitCap(),
               isMine: base.ownerType === OwnerType.PLAYER,
-              canAfford: base.units >= BUILD_COST
+              hasBarracks
           });
       } else {
           onSelectionChange(null);
@@ -686,33 +840,57 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
   };
 
   const generateTerrain = (cols: number, rows: number) => {
-      const map: TerrainType[][] = [];
+      let map: TerrainType[][] = [];
       const seed = Math.random() * 1000;
 
+      // 1. Initial Noise Generation
       for (let y = 0; y < rows; y++) {
           const row: TerrainType[] = [];
           for (let x = 0; x < cols; x++) {
-              // Scale coordinates for noise
               const nx = x;
               const ny = y;
               const n = noise(nx, ny, seed);
               
               let type = TerrainType.WATER;
-
-              // Biome Logic based on Height
-              if (n < -0.4) type = TerrainType.WATER;     // Deep Water
-              else if (n < -0.3) type = TerrainType.SAND; // Beaches
-              else if (n < 0.2) type = TerrainType.GRASS; // Plains
-              else if (n < 0.5) type = TerrainType.FOREST;// Forests
-              else if (n < 0.7) type = TerrainType.HILL;  // Hills (Buildable for Towers)
-              else type = TerrainType.MOUNTAIN;           // Peaks (Impassable)
+              if (n < -0.4) type = TerrainType.WATER;     
+              else if (n < -0.3) type = TerrainType.SAND; 
+              else if (n < 0.2) type = TerrainType.GRASS; 
+              else if (n < 0.5) type = TerrainType.FOREST;
+              else if (n < 0.7) type = TerrainType.HILL;  
+              else type = TerrainType.MOUNTAIN;           
 
               row.push(type);
           }
           map.push(row);
       }
+
+      // 2. Cellular Automata Smoothing (Cleanup lonely pixels)
+      for (let i = 0; i < 2; i++) {
+          const newMap = JSON.parse(JSON.stringify(map));
+          for (let y = 1; y < rows - 1; y++) {
+              for (let x = 1; x < cols - 1; x++) {
+                  let waterCount = 0;
+                  // Check 8 neighbors
+                  for (let dy = -1; dy <= 1; dy++) {
+                      for (let dx = -1; dx <= 1; dx++) {
+                          if (map[y+dy][x+dx] === TerrainType.WATER) waterCount++;
+                      }
+                  }
+                  
+                  // Rule: Surrounded by water -> Become water
+                  if (map[y][x] !== TerrainType.WATER && waterCount >= 6) {
+                      newMap[y][x] = TerrainType.WATER;
+                  } 
+                  // Rule: Surrounded by land -> Become land
+                  else if (map[y][x] === TerrainType.WATER && waterCount <= 2) {
+                       newMap[y][x] = TerrainType.GRASS;
+                  }
+              }
+          }
+          map = newMap;
+      }
       
-      // Ensure border is water/impassable to prevent units stuck at edge
+      // 3. Borders
       for(let y=0; y<rows; y++) {
           map[y][0] = TerrainType.WATER;
           map[y][cols-1] = TerrainType.WATER;
@@ -736,15 +914,42 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
 
       const map = terrainMapRef.current;
       
+      // 1. Fill Deep Ocean Background
+      ctx.fillStyle = COLORS.TERRAIN_WATER;
+      ctx.fillRect(0, 0, width, height);
+
+      // 2. Render Cells
       for (let y = 0; y < rows; y++) {
           for (let x = 0; x < cols; x++) {
               const type = map[y]?.[x] || TerrainType.WATER;
               const posX = x * CELL_SIZE;
               const posY = y * CELL_SIZE;
 
-              let color = COLORS.TERRAIN_WATER;
+              // --- Water & Coastline Logic ---
+              if (type === TerrainType.WATER) {
+                  // Check neighbors for coastline effect
+                  let isCoast = false;
+                  const neighbors = [[0,-1], [0,1], [-1,0], [1,0]]; // Up, Down, Left, Right
+                  for(const [dx, dy] of neighbors) {
+                      const ny = y + dy;
+                      const nx = x + dx;
+                      if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) {
+                          if (map[ny][nx] !== TerrainType.WATER) {
+                              isCoast = true;
+                              break;
+                          }
+                      }
+                  }
+                  if (isCoast) {
+                      ctx.fillStyle = COLORS.TERRAIN_WATER_SHALLOW;
+                      ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
+                  }
+                  continue; 
+              }
+
+              // --- Land Drawing ---
+              let color = COLORS.TERRAIN_GRASS;
               if (type === TerrainType.SAND) color = COLORS.TERRAIN_SAND;
-              else if (type === TerrainType.GRASS) color = COLORS.TERRAIN_GRASS;
               else if (type === TerrainType.FOREST) color = COLORS.TERRAIN_FOREST;
               else if (type === TerrainType.HILL) color = COLORS.TERRAIN_HILL;
               else if (type === TerrainType.MOUNTAIN) color = COLORS.TERRAIN_MOUNTAIN;
@@ -752,19 +957,47 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
               ctx.fillStyle = color;
               ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
               
-              // 8-Bit Pattern Details
-              ctx.fillStyle = 'rgba(0,0,0,0.1)';
-              if (type === TerrainType.GRASS && (x+y)%3 === 0) {
-                  ctx.fillRect(posX+2, posY+2, 2, 2);
+              // --- Organic Texture Details (No more grid lines) ---
+              // Use pseudo-random deterministic noise based on coordinates
+              const seed = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+              const rand = seed - Math.floor(seed);
+
+              if (type === TerrainType.GRASS) {
+                  // Sparse noise for grass
+                  if (rand > 0.85) {
+                      ctx.fillStyle = 'rgba(0,0,0,0.08)';
+                      ctx.fillRect(posX + 2, posY + 2, 2, 2);
+                  }
               } else if (type === TerrainType.FOREST) {
-                  ctx.fillRect(posX+1, posY+1, 2, 2);
-                  ctx.fillRect(posX+4, posY+4, 2, 2);
+                  // Tree Clusters (Darker green organic shapes)
+                  ctx.fillStyle = '#003a28'; 
+                  if (rand > 0.5) {
+                      // Shape A: Tall Tree
+                      ctx.fillRect(posX + 3, posY + 1, 2, 5);
+                      ctx.fillRect(posX + 1, posY + 3, 6, 2);
+                  } else {
+                      // Shape B: Bushy Cluster
+                      ctx.fillRect(posX + 1, posY + 1, 3, 3);
+                      ctx.fillRect(posX + 4, posY + 4, 3, 3);
+                  }
               } else if (type === TerrainType.HILL) {
-                  ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                  ctx.fillRect(posX, posY, 2, 2);
+                  // Mounds
+                  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                  ctx.fillRect(posX + 2, posY + 4, 4, 2);
+                  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+                  ctx.fillRect(posX + 2, posY + 2, 2, 2);
               } else if (type === TerrainType.MOUNTAIN) {
+                  // Snow Peaks
                   ctx.fillStyle = COLORS.TERRAIN_MOUNTAIN_PEAK;
-                  ctx.fillRect(posX+2, posY+1, 4, 3);
+                  ctx.fillRect(posX + 2, posY + 1, 4, 3);
+                  // Rocky Shadow
+                  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                  ctx.fillRect(posX + 4, posY + 3, 2, 5);
+              } else if (type === TerrainType.SAND) {
+                   if (rand > 0.7) {
+                      ctx.fillStyle = '#ccbb22';
+                      ctx.fillRect(posX + 4, posY + 4, 2, 2);
+                   }
               }
           }
       }
@@ -787,20 +1020,15 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     generateTerrain(cols, rows);
     drawTerrainToStaticCanvas(width, height, cols, rows);
 
-    // Place Bases - Random Method with Safety Margins
     const isSmallScreen = width < 600 || height < 600;
     const targetCount = isSmallScreen ? 8 : 15; 
     
     const validPositions: Point[] = [];
-    // Increase margins to prevent UI cutoff (especially top for badges)
     const marginX = 50;
-    const marginY = 60; // Top/Bottom need more for unit badges/popups
-    
-    // Safety check for very small screens
+    const marginY = 60;
     const safeWidth = Math.max(100, width - marginX * 2);
     const safeHeight = Math.max(100, height - marginY * 2);
 
-    // Try to find valid spots
     let attempts = 0;
     while (validPositions.length < targetCount && attempts < 1000) {
          attempts++;
@@ -812,9 +1040,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
          
          if (ty >= 0 && ty < rows && tx >= 0 && tx < cols) {
              const type = terrainMapRef.current[ty][tx];
-             // Bases only on GRASS or FOREST or HILL
              if (type === TerrainType.GRASS || type === TerrainType.FOREST || type === TerrainType.HILL) {
-                  // Check distance to others
                   let tooClose = false;
                   for (const p of validPositions) {
                       if ((px - p.x)**2 + (py - p.y)**2 < 8000) {
@@ -832,7 +1058,9 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     // Player
     const pPos = validPositions.pop()!;
     const playerBase = new Base('player-1', pPos.x, pPos.y, COLORS.PLAYER, OwnerType.PLAYER);
-    playerBase.units = 30;
+    // Player starts with better population to allow initial army
+    playerBase.population = 150; 
+    playerBase.units = 10;
     basesRef.current.push(playerBase);
 
     // Enemies
@@ -843,7 +1071,8 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
         if (validPositions.length === 0) break;
         const pos = validPositions.pop()!;
         const b = new Base(`enemy-${i}`, pos.x, pos.y, enemyColors[i % enemyColors.length], OwnerType.AI);
-        b.units = 25;
+        b.population = 150;
+        b.units = 10;
         basesRef.current.push(b);
     }
 
@@ -852,19 +1081,15 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     while (validPositions.length > 0) {
       const pos = validPositions.pop()!;
       const b = new Base(`neutral-${nIdx++}`, pos.x, pos.y, COLORS.NEUTRAL, OwnerType.NEUTRAL);
-      b.units = 10 + Math.floor(Math.random() * 15);
+      b.units = 5 + Math.floor(Math.random() * 5);
       basesRef.current.push(b);
     }
 
-    // Territory
     const baseCells: Point[][] = basesRef.current.map(() => []);
     const cellOwnerMap = new Map<string, Base>();
 
-    // Voronoi-ish but respects terrain vaguely
     for (let y = 0; y < height; y += CELL_SIZE) {
       for (let x = 0; x < width; x += CELL_SIZE) {
-        // Optimization: Only check every few pixels or simplify distance
-        
         let closestDist = Infinity;
         let closestBaseIndex = -1;
         const cx = x + CELL_SIZE / 2;
@@ -889,12 +1114,9 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       base.setTerritory(baseCells[index]);
     });
 
-    // Determine Neighbors using pathfinding accessibility? 
-    // Simplified: Neighbors are Voronoi adjacents, but unit dispatch will fail if no path.
     const directions = [{x: CELL_SIZE, y: 0}, {x: -CELL_SIZE, y: 0}, {x: 0, y: CELL_SIZE}, {x: 0, y: -CELL_SIZE}];
     baseCells.forEach((cells, index) => {
         const currentBase = basesRef.current[index];
-        // Sample a subset of cells to improve performance
         const sampleRate = 5;
         for(let i=0; i<cells.length; i+=sampleRate) {
             const p = cells[i];
@@ -908,7 +1130,99 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
         }
     });
     
-    onAddLog("地形扫描完成。开始行动。", COLORS.WHITE);
+    onAddLog("系统启动: 战争规则更新。", COLORS.GOLD);
+  };
+
+  const processAIConstruction = () => {
+      basesRef.current.forEach(base => {
+          if (base.ownerType !== OwnerType.AI) return;
+          
+          // Only attempt build occasionally
+          if (Math.random() > 0.02) return;
+
+          let targetType: BuildingType | null = null;
+          let cost = 0;
+
+          const unitCap = base.getUnitCap();
+          
+          // AI Logic 1: If nearing pop cap -> Build House
+          if (base.population >= base.maxPopulation - 10 && base.money >= COSTS.HOUSE) {
+              targetType = BuildingType.HOUSE;
+              cost = COSTS.HOUSE;
+          }
+          // AI Logic 2: If no barracks -> Build Barracks
+          else if (!base.hasBarracks && base.money >= COSTS.BARRACKS) {
+              targetType = BuildingType.BARRACKS;
+              cost = COSTS.BARRACKS;
+          }
+          // AI Logic 3: Rich -> Build Tower or Barracks randomly
+          else if (base.money > 500) {
+              if (Math.random() < 0.5 && base.money >= COSTS.TOWER) {
+                  targetType = BuildingType.TOWER;
+                  cost = COSTS.TOWER;
+              } else if (base.money >= COSTS.BARRACKS) {
+                  targetType = BuildingType.BARRACKS;
+                  cost = COSTS.BARRACKS;
+              }
+          }
+
+          if (targetType) {
+              // Find valid spot
+              // Scan raw territory cells
+              const cells = base.territoryCells;
+              // Shuffle cells to find random spot
+              const candidates = [];
+              for(let i=0; i<10; i++) {
+                   candidates.push(cells[Math.floor(Math.random() * cells.length)]);
+              }
+
+              for (const cell of candidates) {
+                  const tx = Math.floor(cell.x / CELL_SIZE);
+                  const ty = Math.floor(cell.y / CELL_SIZE);
+                  
+                  // Check terrain
+                  const t = terrainMapRef.current[ty]?.[tx];
+                  let isValidTerrain = false;
+                  if (targetType === BuildingType.HOUSE || targetType === BuildingType.BARRACKS) {
+                      isValidTerrain = (t === TerrainType.GRASS || t === TerrainType.FOREST);
+                  } else if (targetType === BuildingType.TOWER) {
+                      isValidTerrain = (t === TerrainType.HILL);
+                  }
+                  
+                  if (!isValidTerrain) continue;
+
+                  // Check Collision
+                  const cx = cell.x;
+                  const cy = cell.y;
+                  
+                  // Check dist from base center
+                  if ((cx - base.x)**2 + (cy - base.y)**2 < (base.radius + 15)**2) continue;
+
+                  // Check buildings
+                  let isColliding = false;
+                  for (const b of buildingsRef.current) {
+                      if ((cx - b.x)**2 + (cy - b.y)**2 < (BUILDING_RADIUS * 2.5)**2) {
+                          isColliding = true; 
+                          break;
+                      }
+                  }
+                  if (isColliding) continue;
+
+                  // Build it!
+                  base.money -= cost;
+                  buildingsRef.current.push(new Building(
+                      `ai-build-${Date.now()}-${Math.random()}`,
+                      targetType,
+                      cx,
+                      cy,
+                      base.id,
+                      base.color
+                  ));
+                  base.recalculateStats(buildingsRef.current);
+                  break; // Built one, stop
+              }
+          }
+      });
   };
 
   useEffect(() => {
@@ -921,16 +1235,11 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
 
     const handleResize = () => {
         const rect = canvas.getBoundingClientRect();
-        
-        // Debounce / Check if size changed significantly (ignore small URL bar scroll shifts)
         const oldW = prevSizeRef.current.w;
         const oldH = prevSizeRef.current.h;
-        if (Math.abs(rect.width - oldW) < 50 && Math.abs(rect.height - oldH) < 50) {
-            return; 
-        }
+        if (Math.abs(rect.width - oldW) < 50 && Math.abs(rect.height - oldH) < 50) return; 
 
         prevSizeRef.current = { w: rect.width, h: rect.height };
-
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
         ctx.scale(dpr, dpr);
@@ -938,14 +1247,12 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
         initLevel(rect.width, rect.height);
     };
 
-    // Initial setup
     const rect = canvas.parentElement?.getBoundingClientRect();
     if (rect) {
         prevSizeRef.current = { w: rect.width, h: rect.height };
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
         ctx.scale(dpr, dpr);
-        // Set style width/height to 100% to fill flex parent
         canvas.style.width = '100%';
         canvas.style.height = '100%';
         ctx.imageSmoothingEnabled = false;
@@ -964,14 +1271,32 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     
     const onBaseCaptured = (base: Base, newColor: string) => {
         const ownerName = getOwnerName(base.ownerType, newColor);
-        onAddLog(`战报: ${base.id} 据点被 ${ownerName} 占领！`, newColor);
+        onAddLog(`战报: ${base.id} 被 ${ownerName} 占领！建筑已尽毁。`, newColor);
+        
+        // Scorched Earth: Remove ALL buildings belonging to this base
+        // Filter OUT buildings that belong to this base ID
+        const oldBuildingCount = buildingsRef.current.length;
+        buildingsRef.current = buildingsRef.current.filter(b => b.ownerBaseId !== base.id);
+        const destroyed = oldBuildingCount - buildingsRef.current.length;
+        
+        if (destroyed > 0) {
+             createExplosion(base.x, base.y + 20, '#555');
+        }
+
+        // Recalculate will reset level to 1 since buildings are gone
+        base.recalculateStats(buildingsRef.current);
+    };
+    
+    const onIncome = (amount: number) => {
+        const newTotal = moneyRef.current + amount;
+        moneyRef.current = newTotal;
+        setPlayerMoney(newTotal); // Sync to UI
     };
 
     const sendSquad = (source: Base, target: Base) => {
       if (!source.neighbors.has(target)) return;
-      if (source.units < 4) return; // Min required for a squad
+      if (source.units < 4) return;
 
-      // Calculate path ONCE for the squad
       const startGrid = { x: Math.floor(source.x / CELL_SIZE), y: Math.floor(source.y / CELL_SIZE) };
       const endGrid = { x: Math.floor(target.x / CELL_SIZE), y: Math.floor(target.y / CELL_SIZE) };
       
@@ -984,23 +1309,19 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
           return;
       }
 
-      // Send 3 units as a squad
       const squadSize = 3;
       if (source.units < squadSize + 1) return;
 
       source.units -= squadSize;
       
-      // Squad offsets for formation
-      const offsets = [
-          {x: 0, y: 0},
-          {x: -4, y: 4},
-          {x: 4, y: 4}
-      ];
+      if(source.ownerType === OwnerType.PLAYER) {
+        onAddLog(`出征: 兵团前往 ${target.id}`, COLORS.PLAYER);
+      }
 
+      const offsets = [ {x: 0, y: 0}, {x: -4, y: 4}, {x: 4, y: 4} ];
       for (let i = 0; i < squadSize; i++) {
-        if (unitsRef.current) {
-             unitsRef.current.push(new Unit(source, target, source.color, path, offsets[i]));
-        }
+        if (unitsRef.current)
+            unitsRef.current.push(new Unit(source, target!, source.color, path, offsets[i]));
       }
       reportSelection(selectedBaseRef.current);
     };
@@ -1010,7 +1331,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       tick++;
       if (!ctx || !canvas) return;
       
-      // Calculate logic size for drawing
       const logicalWidth = canvas.width / dpr;
       const logicalHeight = canvas.height / dpr;
       
@@ -1030,32 +1350,39 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
           if (tick % 10 === 0 && selectedBaseRef.current) {
               reportSelection(selectedBaseRef.current);
           }
+
+          // Run AI Construction Loop occasionally
+          if (tick % 30 === 0) {
+              processAIConstruction();
+          }
       }
 
       const sortedBases = [...basesRef.current].sort((a,b) => a.y - b.y);
 
-      // Draw Territory
       sortedBases.forEach((base) => {
         if (gameStatus === GameStatus.PLAYING) {
-             base.update(true, basesRef.current, unitsRef.current, sendSquad);
+             base.update(true, basesRef.current, unitsRef.current, sendSquad, onIncome);
         }
         const isHighlight = buildModeRef.current && selectedBaseRef.current?.id === base.id;
         base.drawTerritory(ctx, !!isHighlight);
       });
 
-      // Buildings
       buildingsRef.current.forEach(b => {
           const ownerBase = basesRef.current.find(base => base.id === b.ownerBaseId);
           if (ownerBase && ownerBase.color !== b.color) {
-              // Building destroyed/captured behavior: destroy it
-              b.type = null as any; 
+              // Ownership check handled in onBaseCaptured, this is a double check
+              // or for visual consistency. But logic is now: clear on capture.
           } else if (ownerBase) {
-              b.update(unitsRef.current, createLaser, () => ownerBase.units++);
+              b.update(unitsRef.current, createLaser);
           }
       });
       buildingsRef.current = buildingsRef.current.filter(b => b.type);
 
-      // Drag Line
+      // Recalculate caps periodically
+      if (tick % 30 === 0) {
+          basesRef.current.forEach(b => b.recalculateStats(buildingsRef.current));
+      }
+
       if (isDraggingRef.current && dragStartBaseRef.current) {
         const start = dragStartBaseRef.current;
         const mouse = mousePosRef.current;
@@ -1084,7 +1411,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
         ctx.setLineDash([]);
       }
 
-      // Build Ghost
       if (buildModeRef.current && selectedBaseRef.current) {
          const mouse = mousePosRef.current;
          const sb = selectedBaseRef.current;
@@ -1095,7 +1421,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
 
          if (terrainMapRef.current[ty] && terrainMapRef.current[ty][tx]) {
              const t = terrainMapRef.current[ty][tx];
-             if (buildModeRef.current === BuildingType.BARRACKS) {
+             if (buildModeRef.current === BuildingType.BARRACKS || buildModeRef.current === BuildingType.HOUSE) {
                  isValidTerrain = (t === TerrainType.GRASS || t === TerrainType.FOREST);
              } else if (buildModeRef.current === BuildingType.TOWER) {
                  isValidTerrain = (t === TerrainType.HILL);
@@ -1107,7 +1433,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
              isInsideTerritory = true;
          }
 
-         // Collision check with other buildings/bases
          let isColliding = false;
          basesRef.current.forEach(b => {
             if ((mouse.x - b.x)**2 + (mouse.y - b.y)**2 < (b.radius + 10)**2) isColliding = true;
@@ -1125,7 +1450,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
          ctx.restore();
       }
 
-      // Render Objects
       const renderables: {y: number, draw: () => void}[] = [];
 
       sortedBases.forEach(base => {
@@ -1147,7 +1471,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
       renderables.sort((a, b) => a.y - b.y);
       renderables.forEach(r => r.draw());
 
-      // Cleanup
       for (let i = unitsRef.current.length - 1; i >= 0; i--) {
         const u = unitsRef.current[i];
         if (gameStatus === GameStatus.PLAYING) u.update(createExplosion, onBaseCaptured);
@@ -1201,27 +1524,29 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     if (buildModeRef.current && selectedBaseRef.current && ctx) {
         const sb = selectedBaseRef.current;
         
-        // 1. Terrain Check
+        let cost = 0;
+        if (buildModeRef.current === BuildingType.HOUSE) cost = COSTS.HOUSE;
+        else if (buildModeRef.current === BuildingType.TOWER) cost = COSTS.TOWER;
+        else if (buildModeRef.current === BuildingType.BARRACKS) cost = COSTS.BARRACKS;
+
         const tx = Math.floor(pos.x / CELL_SIZE);
         const ty = Math.floor(pos.y / CELL_SIZE);
         let isValidTerrain = false;
 
         if (terrainMapRef.current[ty] && terrainMapRef.current[ty][tx]) {
             const t = terrainMapRef.current[ty][tx];
-            if (buildModeRef.current === BuildingType.BARRACKS) {
+            if (buildModeRef.current === BuildingType.BARRACKS || buildModeRef.current === BuildingType.HOUSE) {
                 isValidTerrain = (t === TerrainType.GRASS || t === TerrainType.FOREST);
             } else if (buildModeRef.current === BuildingType.TOWER) {
                 isValidTerrain = (t === TerrainType.HILL);
             }
         }
 
-        // 2. Territory Check
         let isInsideTerritory = false;
         if (sb.territoryPath && ctx.isPointInPath(sb.territoryPath, pos.x, pos.y)) {
              isInsideTerritory = true;
          }
 
-        // 3. Collision Check
         let isColliding = false;
         basesRef.current.forEach(b => {
             if ((pos.x - b.x)**2 + (pos.y - b.y)**2 < (b.radius + 10)**2) isColliding = true;
@@ -1230,10 +1555,12 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
             if ((pos.x - b.x)**2 + (pos.y - b.y)**2 < (BUILDING_RADIUS * 2)**2) isColliding = true;
         });
         
-        if (isInsideTerritory && !isColliding && isValidTerrain && sb.units >= BUILD_COST) {
-            sb.units -= BUILD_COST;
-            const bName = buildModeRef.current === BuildingType.TOWER ? "哨塔" : "兵营";
-            onAddLog(`建设: 指挥官在据点 ${sb.id} 建造了 ${bName}`, COLORS.PLAYER);
+        if (isInsideTerritory && !isColliding && isValidTerrain && moneyRef.current >= cost) {
+            moneyRef.current -= cost;
+            setPlayerMoney(moneyRef.current);
+
+            const bName = buildModeRef.current === BuildingType.TOWER ? "哨塔" : buildModeRef.current === BuildingType.HOUSE ? "房屋" : "兵营";
+            onAddLog(`建设: 在据点 ${sb.id} 建造了 ${bName}`, COLORS.PLAYER);
             
             buildingsRef.current.push(new Building(
                 `build-${Date.now()}`,
@@ -1244,14 +1571,15 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
                 sb.color
             ));
             
+            // Recalc stats immediately
+            sb.recalculateStats(buildingsRef.current);
+
             buildModeRef.current = null;
             onCancelBuild();
             reportSelection(sb);
             return;
         } else {
-             // Error Feedback
              if (!isInsideTerritory) {
-                  // Clicked outside, maybe cancelling?
                   let clickedAnother = false;
                   basesRef.current.forEach((base) => {
                     const d = (pos.x - base.x)**2 + (pos.y - (base.y - 10))**2;
@@ -1273,7 +1601,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
         }
     }
 
-    // BASE SELECTION / DRAG
     let clickedBase: Base | null = null;
     let minD = Infinity;
 
@@ -1341,7 +1668,6 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(({
     });
 
     if (target && target !== source) {
-         // Trigger Squad Send
          const startGrid = { x: Math.floor(source.x / CELL_SIZE), y: Math.floor(source.y / CELL_SIZE) };
          const endGrid = { x: Math.floor(target.x / CELL_SIZE), y: Math.floor(target.y / CELL_SIZE) };
          
